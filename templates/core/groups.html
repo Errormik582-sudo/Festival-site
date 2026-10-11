@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+{% block title %}Группы{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h1 class="page-title">Группы участников</h1>
+    <p class="page-sub">Объединяйтесь в дружины, отряды и команды</p>
+
+    <div class="grid grid-2" style="grid-template-columns: 1fr 2fr">
+        <!-- Левая колонка: создание -->
+        <div class="card" style="align-self:flex-start">
+            <h3 style="margin-top:0">Создать группу</h3>
+            <div class="form-field">
+                <label>Название</label>
+                <input type="text" id="new-name" placeholder="Например, «Дружина Севера»">
+            </div>
+            <div class="form-field">
+                <label>Лагерь</label>
+                <select id="new-camp">
+                    <option value="">Без лагеря</option>
+                    {% for c in camps %}
+                        <option value="{{ c.id }}">{{ c.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-field">
+                <label>Описание</label>
+                <textarea id="new-desc" rows="3" placeholder="Пара слов о группе"></textarea>
+            </div>
+            <button class="btn btn-accent" id="create-btn" style="width:100%">Создать</button>
+        </div>
+
+        <!-- Правая колонка: список групп -->
+        <div>
+            <div class="card" style="margin-bottom:20px">
+                <input type="text" id="search" placeholder="Поиск по названию..."
+                       style="width:100%;padding:12px 16px;border:1.5px solid var(--border);border-radius:var(--radius);font-family:inherit">
+            </div>
+            <div id="groups-list">
+                <p style="color:#6b776b">Загрузка...</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+    function getCookie(name) {
+        const v = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+        return v ? v.pop() : '';
+    }
+    const CSRF = getCookie('csrftoken');
+    const FESTIVAL_ID = {{ festival.id|default:"null" }};
+    const CURRENT_USER_ID = {{ user.id }};
+    const list = document.getElementById('groups-list');
+    let allGroups = [];
+
+    function render(filter) {
+        const q = (filter || '').toLowerCase();
+        const items = allGroups.filter(g =>
+            g.name.toLowerCase().includes(q) ||
+            (g.description || '').toLowerCase().includes(q)
+        );
+
+        if (!items.length) {
+            list.innerHTML = '<div class="empty"><div class="empty-icon">👥</div><p>Групп пока нет. Создайте первую!</p></div>';
+            return;
+        }
+
+        list.innerHTML = items.map(g => {
+            const isLeader = g.leader === CURRENT_USER_ID;
+            const canEdit = isLeader || {{ is_organizer|yesno:"true,false" }};
+
+            const membersHtml = g.members.map(m =>
+                `<span class="badge" style="background:#e8eee9;color:#2d4a32;margin:2px 4px 2px 0">
+                    ${m.username}
+                    ${canEdit && m.user !== CURRENT_USER_ID
+                        ? `<a href="#" onclick="kickMember(${g.id}, ${m.user}); return false;"
+                              style="margin-left:6px;color:#a8392f;text-decoration:none">×</a>`
+                        : ''}
+                 </span>`
+            ).join('');
+
+            let actionBtn = '';
+            if (g.is_member) {
+                actionBtn = `<button class="btn btn-ghost btn-sm" onclick="leaveGroup(${g.id})">Выйти</button>`;
+            } else {
+                actionBtn = `<button class="btn btn-accent btn-sm" onclick="joinGroup(${g.id})">Вступить</button>`;
+            }
+
+            const deleteBtn = canEdit
+                ? `<button class="btn btn-ghost btn-sm" onclick="deleteGroup(${g.id})" style="color:#a8392f">Удалить</button>`
+                : '';
+
+            return `
+                <div class="card" style="margin-bottom:16px">
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+                        <div style="flex:1">
+                            <h3 style="margin:0 0 4px">
+                                ${g.name}
+                                ${isLeader ? '<span class="badge" style="background:#fbf3d9;color:#b18d1a;margin-left:8px">Лидер</span>' : ''}
+                            </h3>
+                            ${g.camp_name ? `<div style="font-size:.85rem;color:#6b776b">⛺ ${g.camp_name}</div>` : ''}
+                        </div>
+                        <div style="display:flex;gap:6px;flex-wrap:wrap">
+                            ${actionBtn}
+                            ${deleteBtn}
+                        </div>
+                    </div>
+
+                    ${g.description ? `<p style="color:#6b776b;margin:12px 0">${g.description}</p>` : ''}
+
+                    <div style="margin-top:8px">
+                        <div style="font-size:.8rem;color:#6b776b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">
+                            Участников: ${g.members_count}
+                        </div>
+                        <div style="display:flex;flex-wrap:wrap">${membersHtml}</div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function loadGroups() {
+        fetch('/api/groups/').then(r => r.json()).then(data => {
+            allGroups = Array.isArray(data) ? data : (data.results || []);
+            render(document.getElementById('search').value);
+        }).catch(e => {
+            list.innerHTML = '<p style="color:#a8392f">Ошибка загрузки: ' + e + '</p>';
+        });
+    }
+    loadGroups();
+
+    // Поиск
+    document.getElementById('search').addEventListener('input', e => {
+        render(e.target.value);
+    });
+
+    // Создание
+    document.getElementById('create-btn').addEventListener('click', () => {
+        const name = document.getElementById('new-name').value.trim();
+        if (!name) { alert('Введите название'); return; }
+
+        const camp = document.getElementById('new-camp').value || null;
+        const desc = document.getElementById('new-desc').value.trim();
+
+        fetch('/api/groups/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+            body: JSON.stringify({
+                name: name,
+                camp: camp,
+                description: desc,
+                festival: FESTIVAL_ID,
+            }),
+        }).then(r => {
+            if (r.ok) {
+                document.getElementById('new-name').value = '';
+                document.getElementById('new-desc').value = '';
+                loadGroups();
+            } else {
+                r.json().then(d => alert('Ошибка: ' + JSON.stringify(d)));
+            }
+        });
+    });
+
+    // Вступить
+    window.joinGroup = function(id) {
+        fetch('/api/groups/' + id + '/join/', {
+            method: 'POST',
+            headers: { 'X-CSRFToken': CSRF },
+        }).then(r => {
+            if (r.ok) loadGroups();
+            else r.json().then(d => alert(d.error || 'Ошибка'));
+        });
+    };
+
+    // Выйти
+    window.leaveGroup = function(id) {
+        if (!confirm('Выйти из группы?')) return;
+        fetch('/api/groups/' + id + '/leave/', {
+            method: 'POST',
+            headers: { 'X-CSRFToken': CSRF },
+        }).then(r => {
+            if (r.ok) loadGroups();
+            else r.json().then(d => alert(d.error || 'Ошибка'));
+        });
+    };
+
+    // Удалить группу
+    window.deleteGroup = function(id) {
+        if (!confirm('Удалить группу навсегда?')) return;
+        fetch('/api/groups/' + id + '/', {
+            method: 'DELETE',
+            headers: { 'X-CSRFToken': CSRF },
+        }).then(r => {
+            if (r.ok || r.status === 204) loadGroups();
+            else alert('Ошибка удаления');
+        });
+    };
+
+    // Исключить участника
+    window.kickMember = function(groupId, userId) {
+        if (!confirm('Исключить участника?')) return;
+        fetch('/api/groups/' + groupId + '/kick/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+            body: JSON.stringify({ user_id: userId }),
+        }).then(r => {
+            if (r.ok) loadGroups();
+            else r.json().then(d => alert(d.error || 'Ошибка'));
+        });
+    };
+})();
+</script>
+{% endblock %}

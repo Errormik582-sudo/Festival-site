@@ -1,0 +1,427 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Управление картой{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css"/>
+{% endblock %}
+
+{% block content %}
+<div class="container" style="padding-bottom:12px">
+    <h1 class="page-title">Управление картой</h1>
+    <p class="page-sub">Режим организатора: добавление, редактирование и удаление объектов</p>
+</div>
+
+<div class="container" style="padding-top:0">
+    <div class="map-wrap">
+        <div id="map"></div>
+
+        <!-- Панель слоёв -->
+        <div class="map-panel">
+            <h4>Слои</h4>
+            <label class="layer-toggle"><input type="checkbox" id="toggle-locations" checked><span class="layer-dot" style="background:#b6422b"></span>Локации</label>
+            <label class="layer-toggle"><input type="checkbox" id="toggle-roads" checked><span class="layer-dot" style="background:#8b6f47"></span>Дороги</label>
+            <label class="layer-toggle"><input type="checkbox" id="toggle-camps" checked><span class="layer-dot" style="background:#4a7c59"></span>Лагеря</label>
+            <label class="layer-toggle"><input type="checkbox" id="toggle-events" checked><span class="layer-dot" style="background:#c9a227"></span>Мероприятия</label>
+            <label class="layer-toggle"><input type="checkbox" id="toggle-bookings" checked><span class="layer-dot" style="background:#8e44ad"></span>Брони</label>
+            <label class="layer-toggle"><input type="checkbox" id="toggle-infostands" checked><span class="layer-dot" style="background:#2d6fb0"></span>Инфостенды</label>
+        </div>
+
+        <!-- Панель инструментов -->
+        <div class="map-panel" style="top:auto;bottom:20px;right:20px">
+            <h4>Действия</h4>
+            <button class="btn btn-sm" id="add-point" style="width:100%;margin-bottom:6px">+ Точка</button>
+            <button class="btn btn-sm" id="add-road" style="width:100%;margin-bottom:6px">+ Дорога</button>
+            <button class="btn btn-sm" id="add-camp" style="width:100%;margin-bottom:6px">+ Лагерь</button>
+            <button class="btn btn-ghost btn-sm" id="clear-selection" style="width:100%">Отмена</button>
+        </div>
+
+        <div class="legend">
+            <h4>Типы локаций</h4>
+            <div class="legend-item"><span class="layer-dot" style="background:#b6422b"></span>Сцена</div>
+            <div class="legend-item"><span class="layer-dot" style="background:#d98324"></span>Еда</div>
+            <div class="legend-item"><span class="layer-dot" style="background:#c0392b"></span>Медицина</div>
+            <div class="legend-item"><span class="layer-dot" style="background:#2d6fb0"></span>Информация</div>
+            <div class="legend-item"><span class="layer-dot" style="background:#6a7b8a"></span>Туалет</div>
+            <div class="legend-item"><span class="layer-dot" style="background:#3fa9c9"></span>Душ</div>
+            <div class="legend-item"><span class="layer-dot" style="background:#8e44ad"></span>Ярмарка</div>
+            <div class="legend-item"><span class="layer-dot" style="background:#c0392b"></span>Ристалище</div>
+            <div class="legend-item"><span class="layer-dot" style="background:#7a5c3e"></span>Гостиничный лагерь</div>
+            <div class="legend-item"><span class="layer-dot" style="background:#2d4a32"></span>Лагерь организаторов</div>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно для точки -->
+<div id="modal-point" class="modal" style="display:none">
+    <div class="modal-content">
+        <h3 id="modal-point-title">Новая точка</h3>
+        <div class="form-field">
+            <label>Название</label>
+            <input type="text" id="pt-name">
+        </div>
+        <div class="form-field">
+            <label>Тип</label>
+            <select id="pt-type">
+                <option value="stage">Сцена</option>
+                <option value="food">Еда</option>
+                <option value="medical">Медицина</option>
+                <option value="toilet">Туалет</option>
+                <option value="shower">Душ</option>
+                <option value="info">Информация</option>
+                <option value="market">Ярмарка</option>
+                <option value="tournament">Ристалище</option>
+                <option value="camp">Лагерь</option>
+                <option value="hotel_camp">Гостиничный лагерь</option>
+                <option value="organizers_camp">Лагерь организаторов</option>
+                <option value="other">Другое</option>
+            </select>
+        </div>
+        <div class="form-field">
+            <label>Описание</label>
+            <textarea id="pt-desc" rows="3"></textarea>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+            <button class="btn btn-ghost" id="pt-cancel">Отмена</button>
+            <button class="btn btn-accent" id="pt-save">Сохранить</button>
+        </div>
+        <input type="hidden" id="pt-edit-id">
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+<script>
+(function() {
+    // -------- CSRF --------
+    function getCookie(name) {
+        const v = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+        return v ? v.pop() : '';
+    }
+    const CSRF = getCookie('csrftoken');
+    const FESTIVAL_ID = {{ festival.id|default:"null" }};
+
+    // -------- Карта --------
+    const map = L.map('map').setView([58.764184, 31.538780], 14);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap', maxZoom: 19,
+    }).addTo(map);
+
+    // -------- Иконки --------
+    const ICONS = {
+        stage:           { emoji: '♪', cls: 'pin-stage' },
+        food:            { emoji: '🍲', cls: 'pin-food' },
+        medical:         { emoji: '✚', cls: 'pin-medical' },
+        toilet:          { emoji: '⚑', cls: 'pin-toilet' },
+        shower:          { emoji: '💧', cls: 'pin-shower' },
+        info:            { emoji: 'i', cls: 'pin-info' },
+        market:          { emoji: '🛒', cls: 'pin-market' },
+        tournament:      { emoji: '⚔', cls: 'pin-tournament' },
+        camp:            { emoji: '⛺', cls: 'pin-camp' },
+        hotel_camp:      { emoji: '🏨', cls: 'pin-hotel' },
+        organizers_camp: { emoji: '🏕', cls: 'pin-orgcamp' },
+        other:           { emoji: '•', cls: 'pin-other' },
+    };
+    function makeIcon(type) {
+        const cfg = ICONS[type] || ICONS.other;
+        return L.divIcon({
+            html: '<div class="pin ' + cfg.cls + '">' + cfg.emoji + '</div>',
+            className: '', iconSize: [32, 32],
+            iconAnchor: [16, 16], popupAnchor: [0, -16],
+        });
+    }
+
+    // -------- Слои --------
+    const layers = {
+        locations:  L.layerGroup().addTo(map),
+        roads:      L.layerGroup().addTo(map),
+        camps:      L.layerGroup().addTo(map),
+        events:     L.layerGroup().addTo(map),
+        bookings:   L.layerGroup().addTo(map),
+        infostands: L.layerGroup().addTo(map),
+    };
+
+    const drawnItems = new L.FeatureGroup();
+    map.addLayer(drawnItems);
+
+    // -------- Загрузка всех слоёв --------
+    function loadAll() {
+        Object.values(layers).forEach(l => l.clearLayers());
+
+        // Локации
+        fetch('/api/locations/').then(r => r.json()).then(data => {
+            L.geoJSON(data, {
+                pointToLayer: (f, ll) => L.marker(ll, {
+                    icon: makeIcon(f.properties.location_type),
+                }),
+                onEachFeature: (f, layer) => {
+                    const p = f.properties;
+                    layer.bindPopup(
+                        '<div class="popup-title">' + p.name + '</div>' +
+                        '<span class="popup-type">' + p.location_type + '</span>' +
+                        '<div style="display:flex;gap:6px;margin-top:8px">' +
+                        '<button class="btn btn-sm btn-ghost" onclick="delObj(\'locations\',' + f.id + ')">Удалить</button>' +
+                        '</div>'
+                    );
+                }
+            }).addTo(layers.locations);
+        }).catch(e => console.error('locations:', e));
+
+        // Дороги
+        fetch('/api/roads/').then(r => r.json()).then(data => {
+            L.geoJSON(data, {
+                style: f => ({
+                    color: f.properties.road_type === 'main' ? '#8b6f47' : '#b39a76',
+                    weight: f.properties.road_type === 'main' ? 5 : 3,
+                    opacity: 0.85,
+                }),
+                onEachFeature: (f, layer) => {
+                    layer.bindPopup(
+                        '<b>' + (f.properties.name || 'Дорога') + '</b><br>' +
+                        '<button class="btn btn-sm btn-ghost" onclick="delObj(\'roads\',' + f.id + ')">Удалить</button>'
+                    );
+                }
+            }).addTo(layers.roads);
+        }).catch(e => console.error('roads:', e));
+
+        // Лагеря
+        fetch('/api/camps/').then(r => r.json()).then(data => {
+            L.geoJSON(data, {
+                style: { color: '#4a7c59', weight: 2, fillColor: '#4a7c59',
+                         fillOpacity: 0.18, dashArray: '6 4' },
+                onEachFeature: (f, layer) => {
+                    layer.bindPopup(
+                        '<b>' + f.properties.name + '</b><br>' +
+                        '<button class="btn btn-sm btn-ghost" onclick="delObj(\'camps\',' + f.id + ')">Удалить</button>'
+                    );
+                }
+            }).addTo(layers.camps);
+        }).catch(e => console.error('camps:', e));
+
+        // Мероприятия
+        fetch('/api/events/').then(r => r.json()).then(data => {
+            L.geoJSON(data, {
+                filter: f => f.geometry !== null,
+                pointToLayer: (f, ll) => L.circleMarker(ll, {
+                    radius: 9, color: '#c9a227', weight: 2,
+                    fillColor: '#fbf3d9', fillOpacity: 1,
+                }),
+                onEachFeature: (f, layer) => {
+                    const p = f.properties;
+                    layer.bindPopup(
+                        '<div class="popup-title">' + p.title + '</div>' +
+                        '<button class="btn btn-sm btn-ghost" onclick="delObj(\'events\',' + f.id + ')">Удалить</button>'
+                    );
+                }
+            }).addTo(layers.events);
+        }).catch(e => console.error('events:', e));
+
+        // Брони
+        fetch('/api/bookings/').then(r => r.json()).then(data => {
+            L.geoJSON(data, {
+                style: f => {
+                    const colors = {
+                        pending:   { color: '#c9a227', fill: '#fbf3d9' },
+                        confirmed: { color: '#4a7c59', fill: '#e3f0e6' },
+                        rejected:  { color: '#a8392f', fill: '#f5e3e0' },
+                        cancelled: { color: '#6b776b', fill: '#ececea' },
+                    };
+                    const c = colors[f.properties.status] || colors.pending;
+                    return { color: c.color, weight: 2, fillColor: c.fill, fillOpacity: 0.4 };
+                },
+                onEachFeature: (f, layer) => {
+                    const p = f.properties;
+                    layer.bindPopup(
+                        '<b>Бронь #' + f.id + '</b><br>Статус: ' + p.status + '<br>' +
+                        '<button class="btn btn-sm btn-ghost" onclick="delObj(\'bookings\',' + f.id + ')">Удалить</button>'
+                    );
+                }
+            }).addTo(layers.bookings);
+        }).catch(e => console.error('bookings:', e));
+
+        // Инфостенды
+        fetch('/api/infostands/').then(r => r.json()).then(data => {
+            L.geoJSON(data, {
+                filter: f => f.geometry !== null,
+                pointToLayer: (f, ll) => L.marker(ll, {
+                    icon: L.divIcon({
+                        html: '<div class="pin pin-info" style="border-radius:6px">ℹ</div>',
+                        className: '', iconSize: [32, 32],
+                        iconAnchor: [16, 16], popupAnchor: [0, -16],
+                    })
+                }),
+                onEachFeature: (f, layer) => {
+                    const p = f.properties;
+                    layer.bindPopup(
+                        '<div class="popup-title">' + p.title + '</div>' +
+                        '<button class="btn btn-sm btn-ghost" onclick="delObj(\'infostands\',' + f.id + ')">Удалить</button>'
+                    );
+                }
+            }).addTo(layers.infostands);
+        }).catch(e => console.error('infostands:', e));
+    }
+    loadAll();
+
+    // -------- Удаление --------
+    window.delObj = function(resource, id) {
+        if (!confirm('Удалить объект?')) return;
+        fetch('/api/' + resource + '/' + id + '/', {
+            method: 'DELETE',
+            headers: { 'X-CSRFToken': CSRF },
+        }).then(r => {
+            if (r.ok || r.status === 204) {
+                loadAll();
+            } else if (r.status === 403) {
+                alert('Нет прав на удаление (нужна роль организатора)');
+            } else {
+                alert('Ошибка удаления (код ' + r.status + ')');
+            }
+        });
+    };
+
+    // -------- Добавление точки --------
+    let pickingPoint = false;
+    const modal = document.getElementById('modal-point');
+
+    document.getElementById('add-point').addEventListener('click', () => {
+        pickingPoint = true;
+        map.getContainer().style.cursor = 'crosshair';
+    });
+
+    map.on('click', e => {
+        if (!pickingPoint) return;
+        pickingPoint = false;
+        map.getContainer().style.cursor = '';
+        window.tempLatLng = e.latlng;
+        modal.style.display = 'flex';
+        document.getElementById('pt-name').value = '';
+        document.getElementById('pt-desc').value = '';
+    });
+
+    document.getElementById('pt-cancel').addEventListener('click', () => {
+        modal.style.display = 'none';
+    });
+
+    document.getElementById('pt-save').addEventListener('click', () => {
+        const name = document.getElementById('pt-name').value.trim();
+        const type = document.getElementById('pt-type').value;
+        const desc = document.getElementById('pt-desc').value.trim();
+        if (!name) { alert('Введите название'); return; }
+
+        const ll = window.tempLatLng;
+        const payload = {
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: [ll.lng, ll.lat] },
+            properties: {
+                name: name,
+                description: desc,
+                location_type: type,
+                festival: FESTIVAL_ID,
+                priority: 2,
+            }
+        };
+
+        fetch('/api/locations/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': CSRF,
+            },
+            body: JSON.stringify(payload),
+        }).then(r => {
+            if (r.ok) {
+                modal.style.display = 'none';
+                loadAll();
+            } else if (r.status === 403) {
+                alert('Нет прав на создание (нужна роль организатора)');
+            } else {
+                r.json().then(d => alert('Ошибка: ' + JSON.stringify(d)));
+            }
+        });
+    });
+
+    // -------- Рисование дороги и лагеря --------
+    document.getElementById('add-road').addEventListener('click', () => {
+        const drawer = new L.Draw.Polyline(map, {
+            shapeOptions: { color: '#8b6f47', weight: 4 }
+        });
+        drawer.enable();
+    });
+
+    document.getElementById('add-camp').addEventListener('click', () => {
+        const drawer = new L.Draw.Polygon(map, {
+            shapeOptions: { color: '#4a7c59', weight: 2 },
+        });
+        drawer.enable();
+    });
+
+    map.on(L.Draw.Event.CREATED, e => {
+        const layer = e.layer;
+        const type = e.layerType;
+        const geojson = layer.toGeoJSON();
+
+        if (type === 'polyline') {
+            const name = prompt('Название дороги:', 'Новая дорога');
+            if (!name) return;
+            const payload = {
+                type: 'Feature',
+                geometry: geojson.geometry,
+                properties: {
+                    name: name,
+                    road_type: 'main',
+                    festival: FESTIVAL_ID,
+                }
+            };
+            fetch('/api/roads/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+                body: JSON.stringify(payload),
+            }).then(r => {
+                if (r.ok) loadAll();
+                else if (r.status === 403) alert('Нет прав');
+                else alert('Ошибка');
+            });
+        } else if (type === 'polygon') {
+            const name = prompt('Название лагеря:', 'Новый лагерь');
+            if (!name) return;
+            const payload = {
+                type: 'Feature',
+                geometry: geojson.geometry,
+                properties: {
+                    name: name,
+                    camp_type: 'general',
+                    festival: FESTIVAL_ID,
+                }
+            };
+            fetch('/api/camps/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+                body: JSON.stringify(payload),
+            }).then(r => {
+                if (r.ok) loadAll();
+                else if (r.status === 403) alert('Нет прав');
+                else alert('Ошибка');
+            });
+        }
+    });
+
+    // -------- Отмена --------
+    document.getElementById('clear-selection').addEventListener('click', () => {
+        pickingPoint = false;
+        map.getContainer().style.cursor = '';
+        modal.style.display = 'none';
+        drawnItems.clearLayers();
+    });
+
+    // -------- Переключатели слоёв --------
+    ['locations', 'roads', 'camps', 'events', 'bookings', 'infostands'].forEach(key => {
+        document.getElementById('toggle-' + key).addEventListener('change', e => {
+            e.target.checked ? map.addLayer(layers[key]) : map.removeLayer(layers[key]);
+        });
+    });
+})();
+</script>
+{% endblock %}

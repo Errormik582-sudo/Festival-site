@@ -1,0 +1,49 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Былинный берег{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'css/main.css' %}">
+    {% block head %}{% endblock %}
+</head>
+<body>
+
+<header class="topbar">
+    <a href="{% url 'index' %}" class="brand">
+        <span class="brand-mark">Б</span>
+        <span>Былинный берег</span>
+    </a>
+<nav class="nav">
+    <a href="{% url 'index' %}" class="{% if request.resolver_match.url_name == 'index' %}active{% endif %}">Карта</a>
+    <a href="{% url 'events_list' %}" class="{% if request.resolver_match.url_name == 'events_list' %}active{% endif %}">Мероприятия</a>
+    {% if user.is_authenticated %}
+        <a href="{% url 'booking' %}" class="{% if request.resolver_match.url_name == 'booking' %}active{% endif %}">Бронь</a>
+        <a href="{% url 'groups' %}" class="{% if request.resolver_match.url_name == 'groups' %}active{% endif %}">Группы</a>
+    {% endif %}
+    {% if user.is_superuser or user.is_staff %}
+        <a href="/admin/" target="_blank">Админка</a>
+    {% endif %}
+</nav>
+    <div class="auth">
+        {% if user.is_authenticated %}
+            <span class="user-chip">{{ user.username }}</span>
+            <form action="{% url 'logout' %}" method="post" style="margin:0">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-ghost btn-sm">Выйти</button>
+            </form>
+        {% else %}
+            <a href="{% url 'login' %}" class="btn btn-ghost btn-sm">Войти</a>
+            <a href="{% url 'register' %}" class="btn btn-accent btn-sm">Регистрация</a>
+        {% endif %}
+    </div>
+</header>
+
+<main>
+    {% block content %}{% endblock %}
+</main>
+
+{% block scripts %}{% endblock %}
+</body>
+</html>

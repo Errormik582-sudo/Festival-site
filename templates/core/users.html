@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}Управление пользователями{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h1 class="page-title">Пользователи</h1>
+    <p class="page-sub">Назначение ролей на фестивале «{{ festival.name }}»</p>
+
+    <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+            <h3 style="margin:0">Все пользователи</h3>
+            <input type="text" id="user-search" placeholder="Поиск по имени..."
+                   style="padding:8px 14px;border:1.5px solid var(--border);border-radius:999px;font-family:inherit">
+        </div>
+        <div id="users-list">
+            <p style="color:#6b776b">Загрузка...</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+    function getCookie(name) {
+        const v = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+        return v ? v.pop() : '';
+    }
+    const CSRF = getCookie('csrftoken');
+    const list = document.getElementById('users-list');
+    let allUsers = [];
+
+    const ROLE_LABELS = {
+        '': 'Без роли',
+        'organizer': 'Организатор',
+        'moderator': 'Модератор',
+        'volunteer': 'Волонтёр',
+        'participant': 'Участник',
+    };
+
+    function render(filter) {
+        const q = (filter || '').toLowerCase();
+        const items = allUsers.filter(u =>
+            u.username.toLowerCase().includes(q) ||
+            (u.email || '').toLowerCase().includes(q)
+        );
+
+        if (!items.length) {
+            list.innerHTML = '<p style="color:#6b776b">Никого не найдено.</p>';
+            return;
+        }
+
+        list.innerHTML = items.map(u => `
+            <div class="user-row" style="display:flex;align-items:center;gap:16px;padding:14px 0;border-bottom:1px solid var(--border)">
+                <div style="flex:1">
+                    <div style="font-weight:700;color:var(--text)">
+                        ${u.username}
+                        ${u.is_superuser ? '<span class="badge" style="background:#f5e3e0;color:#a8392f;margin-left:8px">SU</span>' : ''}
+                        ${u.is_staff ? '<span class="badge" style="background:#e3ecf5;color:#2d6fb0;margin-left:8px">ADMIN</span>' : ''}
+                    </div>
+                    <div style="font-size:.85rem;color:var(--text-muted)">${u.email || '—'}</div>
+                </div>
+
+                <select class="role-select" data-user="${u.id}" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:10px;font-family:inherit">
+                    <option value="">Без роли</option>
+                    <option value="participant">Участник</option>
+                    <option value="volunteer">Волонтёр</option>
+                    <option value="moderator">Модератор</option>
+                    <option value="organizer">Организатор</option>
+                </select>
+
+                <button class="btn btn-ghost btn-sm staff-btn" data-user="${u.id}" data-staff="${u.is_staff ? '1' : '0'}">
+                    ${u.is_staff ? 'Снять админку' : 'Дать админку'}
+                </button>
+            </div>
+        `).join('');
+
+        // Восстанавливаем выбранные роли.
+        items.forEach(u => {
+            const sel = list.querySelector(`.role-select[data-user="${u.id}"]`);
+            if (sel) sel.value = u.role || '';
+        });
+
+        // Обработчики.
+        list.querySelectorAll('.role-select').forEach(sel => {
+            sel.addEventListener('change', () => {
+                const userId = sel.dataset.user;
+                const role = sel.value;
+                fetch('/api/users/' + userId + '/set_role/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': CSRF,
+                    },
+                    body: JSON.stringify({ role: role }),
+                }).then(r => {
+                    if (r.ok) {
+                        // Обновляем локальные данные.
+                        const u = allUsers.find(x => x.id == userId);
+                        if (u) u.role = role;
+                        flash(sel, 'Сохранено');
+                    } else {
+                        alert('Ошибка сохранения');
+                    }
+                });
+            });
+        });
+
+        list.querySelectorAll('.staff-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const userId = btn.dataset.user;
+                fetch('/api/users/' + userId + '/toggle_staff/', {
+                    method: 'POST',
+                    headers: { 'X-CSRFToken': CSRF },
+                }).then(r => r.json()).then(d => {
+                    if (d.is_staff !== undefined) {
+                        location.reload();
+                    } else {
+                        alert('Ошибка');
+                    }
+                });
+            });
+        });
+    }
+
+    function flash(el, msg) {
+        const original = el.style.borderColor;
+        el.style.borderColor = '#4a7c59';
+        setTimeout(() => { el.style.borderColor = original; }, 800);
+    }
+
+    fetch('/api/users/').then(r => r.json()).then(data => {
+        // DRF может вернуть либо массив, либо пагинированный объект.
+        allUsers = Array.isArray(data) ? data : (data.results || []);
+        render('');
+    }).catch(e => {
+        list.innerHTML = '<p style="color:#a8392f">Ошибка загрузки: ' + e + '</p>';
+    });
+
+    document.getElementById('user-search').addEventListener('input', e => {
+        render(e.target.value);
+    });
+})();
+</script>
+{% endblock %}

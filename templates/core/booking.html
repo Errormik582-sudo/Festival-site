@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}Бронирование территории{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css"/>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h1 class="page-title">Бронирование территории</h1>
+    <p class="page-sub">Нарисуйте полигон внутри лагеря участников</p>
+
+    <div class="grid grid-2" style="grid-template-columns: 2fr 1fr">
+        <div class="map-wrap" style="height: 600px">
+            <div id="map"></div>
+            <div class="map-panel">
+                <h4>Действия</h4>
+                <button class="btn btn-sm" id="draw-territory" style="width:100%;margin-bottom:6px">Нарисовать</button>
+                <button class="btn btn-accent btn-sm" id="submit-booking" style="width:100%">Отправить заявку</button>
+            </div>
+        </div>
+
+        <div>
+            <div class="card">
+                <h3>Мои заявки</h3>
+                {% if my_bookings %}
+                    {% for b in my_bookings %}
+                        <div style="padding:12px 0;border-bottom:1px solid #e3e0d6">
+                            <div><strong>#{{ b.id }}</strong> — {{ b.camp.name }}</div>
+                            <span class="badge badge-{{ b.status }}">{{ b.get_status_display }}</span>
+                            <div style="font-size:.8rem;color:#6b776b;margin-top:4px">
+                                {{ b.created_at|date:"d.m.Y H:i" }}
+                            </div>
+                        </div>
+                    {% endfor %}
+                {% else %}
+                    <p style="color:#6b776b">Пока броней нет.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+<script>
+(function() {
+    function getCookie(name) {
+        const v = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+        return v ? v.pop() : '';
+    }
+    const CSRF = getCookie('csrftoken');
+
+    const map = L.map('map').setView([58.764184, 31.538780], 15);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap', maxZoom: 19,
+    }).addTo(map);
+
+    fetch('/api/camps/').then(r => r.json()).then(data => {
+        L.geoJSON(data, {
+            style: { color: '#4a7c59', weight: 2, fillOpacity: 0.1 },
+            onEachFeature: (f, layer) => layer.bindPopup('<b>' + f.properties.name + '</b>')
+        }).addTo(map);
+    });
+
+    fetch('/api/bookings/').then(r => r.json()).then(data => {
+        L.geoJSON(data, {
+            filter: f => ['pending', 'confirmed'].includes(f.properties.status),
+            style: f => ({
+                color: f.properties.status === 'confirmed' ? '#4a7c59' : '#c9a227',
+                weight: 2,
+                fillColor: f.properties.status === 'confirmed' ? '#e3f0e6' : '#fbf3d9',
+                fillOpacity: 0.5,
+            })
+        }).addTo(map);
+    });
+
+    const drawnItems = new L.FeatureGroup();
+    map.addLayer(drawnItems);
+
+    document.getElementById('draw-territory').addEventListener('click', () => {
+        drawnItems.clearLayers();
+        const drawer = new L.Draw.Polygon(map, {
+            shapeOptions: { color: '#8e44ad', weight: 2 },
+        });
+        drawer.enable();
+    });
+
+    let lastPolygon = null;
+    map.on(L.Draw.Event.CREATED, e => {
+        drawnItems.clearLayers();
+        drawnItems.addLayer(e.layer);
+        lastPolygon = e.layer.toGeoJSON();
+    });
+
+    document.getElementById('submit-booking').addEventListener('click', () => {
+        if (!lastPolygon) { alert('Сначала нарисуйте территорию'); return; }
+
+        fetch('/api/camps/').then(r => r.json()).then(data => {
+            if (!data.features.length) { alert('Нет лагерей для брони'); return; }
+            const campId = data.features[0].id;
+
+            const notes = prompt('Комментарий (необязательно):', '') || '';
+            const payload = {
+                type: 'Feature',
+                geometry: lastPolygon.geometry,
+                properties: {
+                    camp: campId,
+                    festival: data.features[0].properties.festival,
+                    notes: notes,
+                }
+            };
+
+            fetch('/api/bookings/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+                body: JSON.stringify(payload),
+            }).then(r => {
+                if (r.ok) {
+                    alert('Заявка отправлена');
+                    location.reload();
+                } else {
+                    r.json().then(d => alert('Ошибка: ' + JSON.stringify(d)));
+                }
+            });
+        });
+    });
+})();
+</script>
+{% endblock %}

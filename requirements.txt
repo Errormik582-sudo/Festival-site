@@ -1,0 +1,5 @@
+
+Django>=5.0                  # Сам фреймворк. 5.x нужен для актуального GeoDjango.
+djangorestframework          # DRF — для будущего API (сейчас в проекте есть, но не используется).
+djangorestframework-gis      # Расширение DRF: умеет отдавать гео-объекты в GeoJSON.
+django-cors-headers          # Разрешает запросы с других доменов (нужно для фронтенда карты).

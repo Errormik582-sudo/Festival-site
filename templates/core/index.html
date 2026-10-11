@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Карта — Былинный берег{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+{% endblock %}
+
+{% block content %}
+<div class="container" style="padding-bottom:12px">
+    <h1 class="page-title">Карта фестиваля</h1>
+    <p class="page-sub">{% if festival %}{{ festival.name }}{% endif %}</p>
+</div>
+
+<div class="container" style="padding-top:0">
+    <div class="map-wrap">
+        <div id="map"></div>
+
+        <div class="map-panel">
+            <h4>Слои</h4>
+            <label class="layer-toggle"><input type="checkbox" id="layer-locations" checked><span class="layer-dot" style="background:#b6422b"></span>Локации</label>
+            <label class="layer-toggle"><input type="checkbox" id="layer-roads" checked><span class="layer-dot" style="background:#8b6f47"></span>Дороги</label>
+            <label class="layer-toggle"><input type="checkbox" id="layer-camps" checked><span class="layer-dot" style="background:#4a7c59"></span>Лагеря</label>
+            <label class="layer-toggle"><input type="checkbox" id="layer-events" checked><span class="layer-dot" style="background:#c9a227"></span>Мероприятия</label>
+            <label class="layer-toggle"><input type="checkbox" id="layer-bookings" checked><span class="layer-dot" style="background:#8e44ad"></span>Брони</label>
+            <label class="layer-toggle"><input type="checkbox" id="layer-groups" checked><span class="layer-dot" style="background:#4a7c59"></span>Группы</label>
+        </div>
+
+        <div class="legend">
+            <h4>Типы локаций</h4>
+            <div class="legend-item"><span class="layer-dot" style="background:#b6422b"></span>Сцена</div>
+            <div class="legend-item"><span class="layer-dot" style="background:#d98324"></span>Еда</div>
+            <div class="legend-item"><span class="layer-dot" style="background:#c0392b"></span>Медицина</div>
+            <div class="legend-item"><span class="layer-dot" style="background:#2d6fb0"></span>Информация</div>
+            <div class="legend-item"><span class="layer-dot" style="background:#6a7b8a"></span>Туалет</div>
+            <div class="legend-item"><span class="layer-dot" style="background:#3fa9c9"></span>Душ</div>
+            <div class="legend-item"><span class="layer-dot" style="background:#8e44ad"></span>Ярмарка</div>
+            <div class="legend-item"><span class="layer-dot" style="background:#c0392b"></span>Ристалище</div>
+            <div class="legend-item"><span class="layer-dot" style="background:#7a5c3e"></span>Гостиничный лагерь</div>
+            <div class="legend-item"><span class="layer-dot" style="background:#2d4a32"></span>Лагерь организаторов</div>
+        </div>
+
+        {% if is_organizer %}
+            <div style="position:absolute;top:20px;left:20px;z-index:500;display:flex;gap:8px">
+                <a href="{% url 'manage' %}" class="btn btn-accent">Редактировать карту</a>
+                <a href="{% url 'users' %}" class="btn">Пользователи</a>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function() {
+    const map = L.map('map').setView([58.764184, 31.538780], 14);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap', maxZoom: 19,
+    }).addTo(map);
+
+    const ICONS = {
+        stage:           { emoji: '♪', cls: 'pin-stage' },
+        food:            { emoji: '🍲', cls: 'pin-food' },
+        medical:         { emoji: '✚', cls: 'pin-medical' },
+        toilet:          { emoji: '⚑', cls: 'pin-toilet' },
+        shower:          { emoji: '💧', cls: 'pin-shower' },
+        info:            { emoji: 'i', cls: 'pin-info' },
+        market:          { emoji: '🛒', cls: 'pin-market' },
+        tournament:      { emoji: '⚔', cls: 'pin-tournament' },
+        camp:            { emoji: '⛺', cls: 'pin-camp' },
+        hotel_camp:      { emoji: '🏨', cls: 'pin-hotel' },
+        organizers_camp: { emoji: '🏕', cls: 'pin-orgcamp' },
+        other:           { emoji: '•', cls: 'pin-other' },
+    };
+    function makeIcon(type) {
+        const cfg = ICONS[type] || ICONS.other;
+        return L.divIcon({
+            html: '<div class="pin ' + cfg.cls + '">' + cfg.emoji + '</div>',
+            className: '', iconSize: [32, 32],
+            iconAnchor: [16, 16], popupAnchor: [0, -16],
+        });
+    }
+
+    const layers = {
+        locations: L.layerGroup().addTo(map),
+        roads:     L.layerGroup().addTo(map),
+        camps:     L.layerGroup().addTo(map),
+        events:    L.layerGroup().addTo(map),
+        bookings:  L.layerGroup().addTo(map),
+        groups:    L.layerGroup().addTo(map),
+    };
+
+    fetch('/api/locations/').then(r => r.json()).then(data => {
+        L.geoJSON(data, {
+            pointToLayer: (f, ll) => L.marker(ll, { icon: makeIcon(f.properties.location_type) }),
+            onEachFeature: (f, layer) => {
+                const p = f.properties;
+                layer.bindPopup(
+                    '<div class="popup-title">' + p.name + '</div>' +
+                    '<span class="popup-type">' + p.location_type + '</span>' +
+                    (p.description ? '<div>' + p.description + '</div>' : '') +
+                    '<a class="popup-link" href="/locations/' + f.id + '/">Подробнее →</a>'
+                );
+            }
+        }).addTo(layers.locations);
+    }).catch(e => console.error(e));
+
+    fetch('/api/roads/').then(r => r.json()).then(data => {
+        L.geoJSON(data, {
+            style: f => ({
+                color: f.properties.road_type === 'main' ? '#8b6f47' : '#b39a76',
+                weight: f.properties.road_type === 'main' ? 5 : 3,
+                opacity: 0.85, lineCap: 'round',
+            }),
+            onEachFeature: (f, layer) => {
+                if (f.properties.name) layer.bindPopup('<b>' + f.properties.name + '</b>');
+            }
+        }).addTo(layers.roads);
+    }).catch(e => console.error(e));
+
+    fetch('/api/camps/').then(r => r.json()).then(data => {
+        L.geoJSON(data, {
+            style: { color: '#4a7c59', weight: 2, fillColor: '#4a7c59',
+                     fillOpacity: 0.18, dashArray: '6 4' },
+            onEachFeature: (f, layer) => layer.bindPopup('<b>' + f.properties.name + '</b>')
+        }).addTo(layers.camps);
+    }).catch(e => console.error(e));
+
+    fetch('/api/events/').then(r => r.json()).then(data => {
+        L.geoJSON(data, {
+            filter: f => f.geometry !== null,
+            pointToLayer: (f, ll) => L.circleMarker(ll, {
+                radius: 8, color: '#c9a227', weight: 2,
+                fillColor: '#fbf3d9', fillOpacity: 1,
+            }),
+            onEachFeature: (f, layer) => {
+                const p = f.properties;
+                const d = p.start_time ? new Date(p.start_time) : null;
+                const time = d ? d.toLocaleString('ru-RU') : '';
+                layer.bindPopup('<div class="popup-title">' + p.title + '</div>' +
+                    (time ? '<div style="font-size:.85rem;color:#6b776b">' + time + '</div>' : ''));
+            }
+        }).addTo(layers.events);
+    }).catch(e => console.error(e));
+
+    fetch('/api/bookings/').then(r => r.json()).then(data => {
+        L.geoJSON(data, {
+            style: f => {
+                const colors = {
+                    pending:   { color: '#c9a227', fill: '#fbf3d9' },
+                    confirmed: { color: '#4a7c59', fill: '#e3f0e6' },
+                    rejected:  { color: '#a8392f', fill: '#f5e3e0' },
+                    cancelled: { color: '#6b776b', fill: '#ececea' },
+                };
+                const c = colors[f.properties.status] || colors.pending;
+                return {
+                    color: c.color, weight: 2,
+                    fillColor: c.fill, fillOpacity: 0.4,
+                };
+            },
+            onEachFeature: (f, layer) => {
+                layer.bindPopup('<b>Бронь #' + f.id + '</b><br>Статус: ' + f.properties.status);
+            }
+        }).addTo(layers.bookings);
+    }).catch(e => console.error(e));
+
+    fetch('/api/groups/').then(r => r.json()).then(data => {
+        const items = Array.isArray(data) ? data : (data.results || []);
+
+        fetch('/api/camps/').then(r => r.json()).then(campsData => {
+            const camps = {};
+            (campsData.features || []).forEach(f => {
+                const coords = f.geometry.coordinates[0];
+                const xs = coords.map(c => c[0]);
+                const ys = coords.map(c => c[1]);
+                camps[f.id] = [
+                    (Math.min(...ys) + Math.max(...ys)) / 2,
+                    (Math.min(...xs) + Math.max(...xs)) / 2,
+                ];
+            });
+
+            items.forEach(g => {
+                if (!g.camp || !camps[g.camp]) return;
+                const ll = camps[g.camp];
+                const marker = L.marker(ll, {
+                    icon: L.divIcon({
+                        html: '<div class="pin" style="background:#4a7c59;font-size:13px">' + g.members_count + '</div>',
+                        className: '',
+                        iconSize: [32, 32],
+                        iconAnchor: [16, 16],
+                        popupAnchor: [0, -16],
+                    })
+                });
+                marker.bindPopup(
+                    '<div class="popup-title">' + g.name + '</div>' +
+                    '<div style="font-size:.85rem;color:#6b776b">Участников: ' + g.members_count + '</div>' +
+                    (g.leader_username ? '<div style="font-size:.85rem">Лидер: ' + g.leader_username + '</div>' : '') +
+                    '<a class="popup-link" href="/groups/">Все группы →</a>'
+                );
+                marker.addTo(layers.groups);
+            });
+        });
+    }).catch(e => console.error('groups:', e));    
+
+    ['locations', 'roads', 'camps', 'events', 'bookings', 'groups'].forEach(key => {
+        document.getElementById('layer-' + key).addEventListener('change', e => {
+            e.target.checked ? map.addLayer(layers[key]) : map.removeLayer(layers[key]);
+        });
+    });
+})();
+</script>
+{% endblock %}
